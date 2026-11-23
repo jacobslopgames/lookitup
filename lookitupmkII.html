@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>lookitup</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; color: #202124; min-height: 100vh; display: flex; flex-direction: column; }
+    header { display: none; border-bottom: 1px solid #ebebeb; align-items: center; gap: 20px; padding: 16px 24px; }
+    main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 16px 14vh; }
+    .logo { display: flex; align-items: center; gap: 10px; font-size: 56px; font-weight: 700; letter-spacing: -2px; color: #000; margin-bottom: 24px; cursor: pointer; user-select: none; }
+    .logo svg { width: 46px; height: 46px; stroke: #000; stroke-width: 2.8; flex-shrink: 0; }
+    form { width: 100%; max-width: 560px; }
+    .bar { display: flex; align-items: center; border: 1px solid #dfe1e5; border-radius: 24px; height: 44px; padding: 0 16px; }
+    .bar:focus-within, .bar:hover { box-shadow: 0 1px 6px rgba(32,33,36,.28); border-color: transparent; }
+    .bar input { border: none; outline: none; font-size: 16px; padding: 0 8px; width: 100%; }
+    .btn { background: #f8f9fa; border: 1px solid #f8f9fa; border-radius: 4px; color: #3c4043; font-size: 14px; padding: 8px 16px; cursor: pointer; }
+    .btn:hover { border-color: #dadce0; color: #202124; }
+    .center { display: flex; justify-content: center; gap: 10px; margin-top: 22px; }
+
+    /* Results Layout */
+    body.active header { display: flex; }
+    body.active .logo { font-size: 26px; letter-spacing: -1px; margin: 0; gap: 6px; }
+    body.active .logo svg { width: 22px; height: 22px; }
+    body.active .center { display: none; }
+    body.active main { display: block; padding: 20px 24px 48px 154px; max-width: 780px; }
+    #meta { font-size: 13px; color: #70757a; margin-bottom: 18px; }
+    .item { margin-bottom: 24px; }
+    .url { font-size: 13px; color: #202124; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .title { font-size: 20px; color: #1a0dab; text-decoration: none; display: inline-block; margin: 2px 0; }
+    .title:hover { text-decoration: underline; }
+    .title:visited { color: #681da8; }
+    .snip { font-size: 14px; line-height: 1.5; color: #4d5156; }
+    @media (max-width: 700px) {
+      body.active header { flex-wrap: wrap; }
+      body.active form { order: 3; max-width: 100%; }
+      body.active main { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <header id="top"></header>
+
+  <main id="main">
+    <div class="logo" id="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="7.5"></circle>
+        <line x1="20.5" y1="20.5" x2="16.35" y2="16.35"></line>
+      </svg>
+      <span>lookitup</span>
+    </div>
+
+    <form id="search-form" autocomplete="off">
+      <div class="bar">
+        <input type="text" id="q" autofocus aria-label="Search">
+      </div>
+      <div class="center">
+        <button type="submit" class="btn">lookitup Search</button>
+      </div>
+    </form>
+
+    <div id="results" style="display:none;">
+      <div id="meta"></div>
+      <div id="list"></div>
+    </div>
+  </main>
+
+  <script>
+    const $ = id => document.getElementById(id);
+
+    $("logo").onclick = () => {
+      document.body.classList.remove("active");
+      $("main").prepend($("logo"), $("search-form"));
+      $("results").style.display = "none";
+      $("q").value = "";
+      document.title = "lookitup";
+      $("q").focus();
+    };
+
+    $("search-form").onsubmit = async e => {
+      e.preventDefault();
+      const q = $("q").value.trim();
+      if (!q) return;
+
+      document.body.classList.add("active");
+      $("top").append($("logo"), $("search-form"));
+      $("results").style.display = "block";
+      $("meta").textContent = "Searching...";
+      $("list").innerHTML = "";
+      document.title = `${q} - lookitup`;
+
+      try {
+        const url = `https://wikipedia.org{encodeURIComponent(q)}`;
+        const [, titles, snippets, links] = await (await fetch(url)).json();
+        $("meta").textContent = `${titles.length} results`;
+
+        if (!titles.length) {
+          $("list").textContent = `No results found for "${q}".`;
+          return;
+        }
+
+        titles.forEach((title, i) => {
+          const el = document.createElement("div");
+          el.className = "item";
+          el.innerHTML = `<div class="url"></div><a class="title"></a><div class="snip"></div>`;
+          el.querySelector(".url").textContent = links[i];
+          el.querySelector(".title").textContent = title;
+          el.querySelector(".title").href = links[i];
+          el.querySelector(".snip").textContent = snippets[i] || "";
+          $("list").appendChild(el);
+        });
+      } catch (err) {
+        $("meta").textContent = "";
+        $("list").textContent = `Error: ${err.message}`;
+      }
+    };
+  </script>
+</body>
+</html>
