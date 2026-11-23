@@ -1,3 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>lookitup</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; color: #202124; min-height: 100vh; display: flex; flex-direction: column; }
+    header { display: none; border-bottom: 1px solid #ebebeb; align-items: center; gap: 20px; padding: 16px 24px; }
+    main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 16px 14vh; }
+    .logo { display: flex; align-items: center; gap: 10px; font-size: 56px; font-weight: 700; letter-spacing: -2px; color: #000; margin-bottom: 24px; cursor: pointer; user-select: none; }
+    .logo svg { width: 46px; height: 46px; stroke: #000; stroke-width: 2.8; flex-shrink: 0; }
+    form { width: 100%; max-width: 560px; }
+    .bar { display: flex; align-items: center; border: 1px solid #dfe1e5; border-radius: 24px; height: 44px; padding: 0 16px; }
+    .bar:focus-within, .bar:hover { box-shadow: 0 1px 6px rgba(32,33,36,.28); border-color: transparent; }
+    .bar input { border: none; outline: none; font-size: 16px; padding: 0 8px; width: 100%; }
+    .btn { background: #f8f9fa; border: 1px solid #f8f9fa; border-radius: 4px; color: #3c4043; font-size: 14px; padding: 8px 16px; cursor: pointer; }
+    .btn:hover { border-color: #dadce0; color: #202124; }
+    .center { display: flex; justify-content: center; gap: 10px; margin-top: 22px; }
+
+    /* Results Layout */
+    body.active header { display: flex; }
+    body.active .logo { font-size: 26px; letter-spacing: -1px; margin: 0; gap: 6px; }
+    body.active .logo svg { width: 22px; height: 22px; }
+    body.active .center { display: none; }
+    body.active main { display: block; padding: 20px 24px 48px 154px; max-width: 780px; }
+    #meta { font-size: 13px; color: #70757a; margin-bottom: 18px; }
+    .item { margin-bottom: 24px; }
+    .url { font-size: 13px; color: #202124; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .title { font-size: 20px; color: #1a0dab; text-decoration: none; display: inline-block; margin: 2px 0; }
+    .title:hover { text-decoration: underline; }
+    .title:visited { color: #681da8; }
+    .snip { font-size: 14px; line-height: 1.5; color: #4d5156; }
+    @media (max-width: 700px) {
+      body.active header { flex-wrap: wrap; }
+      body.active form { order: 3; max-width: 100%; }
+      body.active main { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <header id="top"></header>
+
+  <main id="main">
+    <div class="logo" id="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="7.5"></circle>
+        <line x1="20.5" y1="20.5" x2="16.35" y2="16.35"></line>
+      </svg>
+      <span>lookitup</span>
+    </div>
+
+    <form id="search-form" autocomplete="off">
+      <div class="bar">
+        <input type="text" id="q" autofocus aria-label="Search">
+      </div>
+      <div class="center">
+        <button type="submit" class="btn">lookitup Search</button>
+      </div>
+    </form>
+
+    <div id="results" style="display:none;">
+      <div id="meta"></div>
+      <div id="list"></div>
+    </div>
+  </main>
+
   <script>
     const $ = id => document.getElementById(id);
 
@@ -37,31 +105,31 @@
       document.title = `${q} - lookitup`;
 
       try {
-        // Run DuckDuckGo Instant Answer + Wikipedia Search + Wikidata Official Sites in parallel
         const [ddg, wiki, wd] = await Promise.all([
           fetch(`https://duckduckgo.com{encodeURIComponent(q)}&format=json&no_html=1&skip_disambig=1`).then(r => r.json()).catch(() => ({})),
           fetch(`https://wikipedia.org{encodeURIComponent(q)}`).then(r => r.json()).catch(() => ({})),
           fetch(`https://wikidata.org{encodeURIComponent(q)}`).then(r => r.json()).catch(() => ({}))
         ]);
 
-        // 1. Official external website from DuckDuckGo (e.g., searching "github" -> https://github.com)
+        // 1. Official external website from DuckDuckGo
         (ddg.Results || []).forEach(r => {
           if (r.FirstURL) addResult(r.FirstURL, r.Text || q, "Official site via DuckDuckGo");
         });
 
-        // 2. Fetch official external websites (Property P856) for top matching Wikidata entities
+        // 2. Official external websites (Property P856) from Wikidata
         const ids = (wd.search || []).map(x => x.id).join("|");
         if (ids) {
           const entities = await fetch(`https://wikidata.org|labels|descriptions&languages=en&ids=${ids}`).then(r => r.json()).catch(() => ({}));
           Object.values(entities.entities || {}).forEach(ent => {
-            const site = ent.claims?.P856?.[0]?.mainsnak?.datavalue?.value;
-            const label = ent.labels?.en?.value || q;
-            const desc = ent.descriptions?.en?.value || "";
+            const claims = ent.claims && ent.claims.P856;
+            const site = claims && claims[0] && claims[0].mainsnak && claims[0].mainsnak.datavalue && claims[0].mainsnak.datavalue.value;
+            const label = (ent.labels && ent.labels.en && ent.labels.en.value) || q;
+            const desc = (ent.descriptions && ent.descriptions.en && ent.descriptions.en.value) || "";
             if (site) addResult(site, `${label} — Official Website`, desc);
           });
         }
 
-        // 3. Direct domain shortcut if query looks like a site/brand (e.g., "reddit", "youtube", "nytimes.com")
+        // 3. Direct domain shortcut if query looks like a URL
         if (/^[a-z0-9-]+(\.[a-z]{2,})+$/i.test(q)) {
           const direct = q.startsWith("http") ? q : `https://${q.toLowerCase()}`;
           addResult(direct, direct, "Direct website match");
@@ -73,7 +141,7 @@
         }
         (ddg.RelatedTopics || []).forEach(t => {
           if (t.FirstURL && t.Text && seen.size < 12) {
-            addResult(t.FirstURL, t.Text.split(" - "), t.Text);
+            addResult(t.FirstURL, t.Text.split(" - ")[0], t.Text);
           }
         });
 
@@ -98,3 +166,5 @@
     const initQ = new URLSearchParams(location.search).get("q");
     if (initQ) { $("q").value = initQ; runSearch(initQ); }
   </script>
+</body>
+</html>
