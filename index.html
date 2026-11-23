@@ -78,9 +78,31 @@
       $("q").focus();
     };
 
-    $("search-form").onsubmit = async e => {
-      e.preventDefault();
-      const q = $("q").value.trim();
+    window.onResults = data => {
+      const items = data?.query?.search || [];
+      $("meta").textContent = `${items.length} results`;
+      $("list").innerHTML = "";
+
+      if (!items.length) {
+        $("list").textContent = `No results found.`;
+        return;
+      }
+
+      items.forEach(item => {
+        const href = `https://wikipedia.org{encodeURIComponent(item.title.replace(/ /g, "_"))}`;
+        const el = document.createElement("div");
+        el.className = "item";
+        el.innerHTML = `<div class="url"></div><a class="title"></a><div class="snip"></div>`;
+        el.querySelector(".url").textContent = href;
+        el.querySelector(".title").textContent = item.title;
+        el.querySelector(".title").href = href;
+        el.querySelector(".snip").innerHTML = item.snippet + "...";
+        $("list").appendChild(el);
+      });
+    };
+
+    function runSearch(q) {
+      q = q.trim();
       if (!q) return;
 
       document.body.classList.add("active");
@@ -90,31 +112,20 @@
       $("list").innerHTML = "";
       document.title = `${q} - lookitup`;
 
-      try {
-        const url = `https://wikipedia.org{encodeURIComponent(q)}`;
-        const [, titles, snippets, links] = await (await fetch(url)).json();
-        $("meta").textContent = `${titles.length} results`;
+      const old = document.getElementById("jsonp");
+      if (old) old.remove();
 
-        if (!titles.length) {
-          $("list").textContent = `No results found for "${q}".`;
-          return;
-        }
+      const s = document.createElement("script");
+      s.id = "jsonp";
+      s.src = `https://wikipedia.org{encodeURIComponent(q)}`;
+      s.onerror = () => { $("meta").textContent = ""; $("list").textContent = "Network error: check internet connection or ad-blocker."; };
+      document.body.appendChild(s);
+    }
 
-        titles.forEach((title, i) => {
-          const el = document.createElement("div");
-          el.className = "item";
-          el.innerHTML = `<div class="url"></div><a class="title"></a><div class="snip"></div>`;
-          el.querySelector(".url").textContent = links[i];
-          el.querySelector(".title").textContent = title;
-          el.querySelector(".title").href = links[i];
-          el.querySelector(".snip").textContent = snippets[i] || "";
-          $("list").appendChild(el);
-        });
-      } catch (err) {
-        $("meta").textContent = "";
-        $("list").textContent = `Error: ${err.message}`;
-      }
-    };
+    $("search-form").onsubmit = e => { e.preventDefault(); runSearch($("q").value); };
+
+    const initQ = new URLSearchParams(location.search).get("q");
+    if (initQ) { $("q").value = initQ; runSearch(initQ); }
   </script>
 </body>
 </html>
