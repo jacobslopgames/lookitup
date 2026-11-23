@@ -28,10 +28,12 @@
     #meta { font-size: 13px; color: #70757a; margin-bottom: 18px; }
     .item { margin-bottom: 24px; }
     .url { font-size: 13px; color: #202124; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .title { font-size: 20px; color: #1a0dab; text-decoration: none; display: inline-block; margin: 2px 0; }
+    .tag { font-size: 11px; color: #5f6368; border: 1px solid #dadce0; border-radius: 4px; padding: 1px 5px; margin-right: 6px; vertical-align: middle; }
+    .title { font-size: 20px; color: #1a0dab; text-decoration: none; display: inline-block; margin: 3px 0; }
     .title:hover { text-decoration: underline; }
     .title:visited { color: #681da8; }
     .snip { font-size: 14px; line-height: 1.5; color: #4d5156; }
+    .map-frame { width: 100%; height: 180px; border: 1px solid #dfe1e5; border-radius: 8px; margin-top: 8px; }
     @media (max-width: 700px) {
       body.active header { flex-wrap: wrap; }
       body.active form { order: 3; max-width: 100%; }
@@ -79,16 +81,26 @@
     };
 
     const seen = new Set();
-    function addResult(url, title, snippet) {
+    function addResult(url, title, snippet, source, mapBox = null) {
       if (!url || seen.has(url)) return;
       seen.add(url);
       const el = document.createElement("div");
       el.className = "item";
-      el.innerHTML = `<div class="url"></div><a class="title"></a><div class="snip"></div>`;
-      el.querySelector(".url").textContent = url;
+      el.innerHTML = `<div class="url"><span class="tag"></span><span class="href"></span></div><a class="title"></a><div class="snip"></div>`;
+      el.querySelector(".tag").textContent = source;
+      el.querySelector(".href").textContent = url;
       el.querySelector(".title").textContent = title || url;
       el.querySelector(".title").href = url;
       el.querySelector(".snip").innerHTML = snippet || "";
+
+      if (mapBox) {
+        const [s, n, w, e] = mapBox;
+        const iframe = document.createElement("iframe");
+        iframe.className = "map-frame";
+        iframe.loading = "lazy";
+        iframe.src = `https://openstreetmap.org{w},${s},${e},${n}&layer=mapnik&marker=${(Number(s)+Number(n))/2},${(Number(w)+Number(e))/2}`;
+        el.appendChild(iframe);
+      }
       $("list").appendChild(el);
     }
 
@@ -103,62 +115,79 @@
       $("list").innerHTML = "";
       seen.clear();
       document.title = `${q} - lookitup`;
+      const t0 = performance.now();
 
-      try {
-        const [ddg, wiki, wd] = await Promise.all([
-          fetch(`https://duckduckgo.com{encodeURIComponent(q)}&format=json&no_html=1&skip_disambig=1`).then(r => r.json()).catch(() => ({})),
-          fetch(`https://wikipedia.org{encodeURIComponent(q)}`).then(r => r.json()).catch(() => ({})),
-          fetch(`https://wikidata.org{encodeURIComponent(q)}`).then(r => r.json()).catch(() => ({}))
-        ]);
+      // Fetch Map (Nominatim), DuckDuckGo, Wikipedia, Wikidata, and Web Articles (Algolia HN) in parallel
+      const [mapData, ddg, wiki, wd, articles] = await Promise.all([
+        fetch(`https://openstreetmap.org{encodeURIComponent(q)}&format=json&limit=1`).then(r => r.json()).catch(() => []),
+        fetch(`https://duckduckgo.com{encodeURIComponent(q)}&format=json&no_html=1`).then(r => r.json()).catch(() => ({})),
+        fetch(`https://wikipedia.org{encodeURIComponent(q)}`).then(r => r.json()).catch(() => ({})),
+        fetch(`https://wikidata.org{encodeURIComponent(q)}`).then(r => r.json()).catch(() => ({})),
+        fetch(`https://algolia.com{encodeURIComponent(q)}&tags=story&hitsPerPage=6`).then(r => r.json()).catch(() => ({}))
+      ]);
 
-        // 1. Official external website from DuckDuckGo
-        (ddg.Results || []).forEach(r => {
-          if (r.FirstURL) addResult(r.FirstURL, r.Text || q, "Official site via DuckDuckGo");
-        });
-
-        // 2. Official external websites (Property P856) from Wikidata
-        const ids = (wd.search || []).map(x => x.id).join("|");
-        if (ids) {
-          const entities = await fetch(`https://wikidata.org|labels|descriptions&languages=en&ids=${ids}`).then(r => r.json()).catch(() => ({}));
-          Object.values(entities.entities || {}).forEach(ent => {
-            const claims = ent.claims && ent.claims.P856;
-            const site = claims && claims[0] && claims[0].mainsnak && claims[0].mainsnak.datavalue && claims[0].mainsnak.datavalue.value;
-            const label = (ent.labels && ent.labels.en && ent.labels.en.value) || q;
-            const desc = (ent.descriptions && ent.descriptions.en && ent.descriptions.en.value) || "";
-            if (site) addResult(site, `${label} — Official Website`, desc);
-          });
-        }
-
-        // 3. Direct domain shortcut if query looks like a URL
-        if (/^[a-z0-9-]+(\.[a-z]{2,})+$/i.test(q)) {
-          const direct = q.startsWith("http") ? q : `https://${q.toLowerCase()}`;
-          addResult(direct, direct, "Direct website match");
-        }
-
-        // 4. DuckDuckGo Abstract & Related Topics
-        if (ddg.AbstractURL && ddg.AbstractText) {
-          addResult(ddg.AbstractURL, ddg.Heading || q, ddg.AbstractText);
-        }
-        (ddg.RelatedTopics || []).forEach(t => {
-          if (t.FirstURL && t.Text && seen.size < 12) {
-            addResult(t.FirstURL, t.Text.split(" - ")[0], t.Text);
-          }
-        });
-
-        // 5. Matching Wikipedia articles
-        (wiki?.query?.search || []).forEach(item => {
-          if (seen.size < 15) {
-            const href = `https://wikipedia.org{encodeURIComponent(item.title.replace(/ /g, "_"))}`;
-            addResult(href, item.title, item.snippet + "...");
-          }
-        });
-
-        $("meta").textContent = `${seen.size} results`;
-        if (!seen.size) $("list").textContent = `No results found for "${q}".`;
-      } catch (err) {
-        $("meta").textContent = "";
-        $("list").textContent = `Error: ${err.message}`;
+      // 1. Direct Domain Match
+      if (/^[a-z0-9-]+(\.[a-z]{2,})+$/i.test(q)) {
+        const direct = q.startsWith("http") ? q : `https://${q.toLowerCase()}`;
+        addResult(direct, direct, "Direct website match", "Web");
       }
+
+      // 2. Official Websites from DuckDuckGo & Wikidata (P856)
+      (ddg.Results || []).forEach(r => {
+        if (r.FirstURL) addResult(r.FirstURL, r.Text || q, "Official site", "DuckDuckGo");
+      });
+
+      const ids = (wd.search || []).map(x => x.id).join("|");
+      if (ids) {
+        const entities = await fetch(`https://wikidata.org|labels|descriptions&languages=en&ids=${ids}`).then(r => r.json()).catch(() => ({}));
+        Object.values(entities.entities || {}).forEach(ent => {
+          const claims = ent.claims && ent.claims.P856;
+          const site = claims && claims && claims.mainsnak && claims.mainsnak.datavalue && claims.mainsnak.datavalue.value;
+          const label = (ent.labels && ent.labels.en && ent.labels.en.value) || q;
+          const desc = (ent.descriptions && ent.descriptions.en && ent.descriptions.en.value) || "";
+          if (site) addResult(site, `${label} — Official Website`, desc, "Official Link");
+        });
+      }
+
+      // 3. Map Data (OpenStreetMap Nominatim)
+      if (Array.isArray(mapData) && mapData.length > 0) {
+        const place = mapData;
+        const osmUrl = `https://openstreetmap.org{place.lat}&mlon=${place.lon}#map=14/${place.lat}/${place.lon}`;
+        addResult(
+          osmUrl,
+          place.display_name.split(","),
+          `${place.display_name} (${Number(place.lat).toFixed(4)}, ${Number(place.lon).toFixed(4)})`,
+          "Map",
+          place.boundingbox
+        );
+      }
+
+      // 4. DuckDuckGo Abstract & Flattened Topics
+      if (ddg.AbstractURL && ddg.AbstractText) {
+        addResult(ddg.AbstractURL, ddg.Heading || q, ddg.AbstractText, "DuckDuckGo");
+      }
+      const flatTopics = [];
+      (ddg.RelatedTopics || []).forEach(t => t.Topics ? flatTopics.push(...t.Topics) : flatTopics.push(t));
+      flatTopics.slice(0, 4).forEach(t => {
+        if (t.FirstURL && t.Text) addResult(t.FirstURL, t.Text.split(" - "), t.Text, "DuckDuckGo");
+      });
+
+      // 5. Web Articles (Algolia HN Search)
+      (articles.hits || []).forEach(hit => {
+        if (hit.url) {
+          addResult(hit.url, hit.title, `Article • ${hit.points || 0} points • by ${hit.author}`, "Article");
+        }
+      });
+
+      // 6. Wikipedia Encyclopedia Results
+      (wiki?.query?.search || []).forEach(item => {
+        const href = `https://wikipedia.org{encodeURIComponent(item.title.replace(/ /g, "_"))}`;
+        addResult(href, item.title, item.snippet + "...", "Wikipedia");
+      });
+
+      const sec = ((performance.now() - t0) / 1000).toFixed(2);
+      $("meta").textContent = `${seen.size} results (${sec}s)`;
+      if (!seen.size) $("list").textContent = `No results found for "${q}".`;
     }
 
     $("search-form").onsubmit = e => { e.preventDefault(); runSearch($("q").value); };
